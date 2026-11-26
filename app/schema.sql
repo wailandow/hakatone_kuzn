@@ -97,4 +97,12 @@ CREATE TABLE IF NOT EXISTS webim_inbox (
  message_id TEXT NOT NULL UNIQUE, pending_text TEXT, pending_page_url TEXT
 );
 CREATE INDEX IF NOT EXISTS webim_inbox_pending ON webim_inbox(chat_id,seq) WHERE pending_text IS NOT NULL;
+CREATE TABLE IF NOT EXISTS demo_chats (
+ chat_id TEXT PRIMARY KEY REFERENCES chats(chat_id), capability_hash TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS demo_kb_drafts (
+ id TEXT PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES demo_chats(chat_id),
+ reply_id INTEGER NOT NULL REFERENCES messages(id), question TEXT NOT NULL, answer TEXT NOT NULL,
+ mode TEXT NOT NULL, article_id INTEGER REFERENCES kb_articles(id)
+);
 COMMIT;

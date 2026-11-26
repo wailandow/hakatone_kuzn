@@ -125,7 +125,7 @@ class Agent:
                     await self._proxy.aclose()
                 self._client = self._proxy = None
 
-    def _audit_call(self, chat_id, step, start, *, usage=None, error=None):
+    def _audit_call(self, chat_id, step, start, *, usage=None, error=None, event_type='llm_call', model=None):
         prompt = getattr(usage, 'prompt_tokens', None)
         completion = getattr(usage, 'completion_tokens', None)
         cost = None
@@ -133,16 +133,18 @@ class Agent:
             try:
                 recorded_cost = float((prompt * Decimal(str(self.settings.llm_price_in_per_1m))
                                        + completion * Decimal(str(self.settings.llm_price_out_per_1m))) / 1_000_000)
-                if isfinite(recorded_cost) and recorded_cost >= 0:
+                if ((model is None or model == self.settings.llm_model)
+                        and self.settings.llm_price_in_per_1m > 0 and self.settings.llm_price_out_per_1m > 0
+                        and isfinite(recorded_cost) and recorded_cost >= 0):
                     cost = recorded_cost
             except (DecimalException, ValueError, TypeError, OverflowError):
                 pass  # Cost is optional; keep the turn and the rest of its audit record.
         else:
             prompt = completion = None
-        payload = {'model': self.settings.llm_model, 'step': step}
+        payload = {'model': model or self.settings.llm_model, 'step': step}
         if error:
             payload['exception'] = error
-        self.tools.audit(chat_id, 'llm_call', payload, prompt_tokens=prompt,
+        self.tools.audit(chat_id, event_type, payload, prompt_tokens=prompt,
                          completion_tokens=completion, cost_usd=cost, latency_ms=_elapsed(start))
 
     @staticmethod
@@ -180,6 +182,12 @@ class Agent:
         if chat is None or chat['status'] != 'bot':
             return None
         if not self.settings.llm_model or (self._client is None and not self.settings.llm_api_key):
+            if self.settings.demo_enabled and history:
+                from app.demo import offline_answer
+
+                reply = await asyncio.to_thread(offline_answer, self.tools, chat_id, history[-1]['content'])
+                if reply:
+                    return reply
             return await self._recover(chat_id, 'LLM_NOT_CONFIGURED')
         system = [{'role': 'system', 'content': SYSTEM_PROMPT}]
         try:

@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Softline — стенд пресейла</title>
+  <link rel="stylesheet" href="/demo.css">
+  <script defer src="/demo.js"></script>
+</head>
+<body>
+<header class="top"><strong>Softline <span>/</span> Пресейл</strong><span class="label">Только демоданные · Mock-Webim 2.0</span></header>
+<main>
+  <section class="pane client" aria-labelledby="client-title">
+    <header><p class="label">01 / store.softline.ru</p><h1 id="client-title">Клиентский чат</h1><p id="status" role="status">Открываем диалог…</p></header>
+    <form id="new" class="row">
+      <label class="grow">Страница сайта<select id="page">
+        <option value="home">store.softline.ru/</option><option value="redcheck">/alteks-soft/redcheck/</option>
+        <option value="red-os">/redsoft/red-os-1/</option><option value="power-bi">/microsoft/microsoft-power-bi/</option>
+      </select></label><button type="submit">Новый диалог</button>
+    </form>
+    <div class="quick" aria-label="Проверочные вопросы">
+      <button type="button" data-ask="Как оформить тестовый пилот?">Тестовый пилот</button>
+      <button type="button" data-ask="Сравните RedCheck и РЕД ОС по назначению.">Товары</button>
+      <button type="button" data-ask="Подготовьте КП на одну лицензию с этой страницы.">КП</button>
+      <button type="button" data-ask="Нужна скидка больше 5%. Переведите на менеджера.">Эскалация</button>
+    </div>
+    <ol id="client-log" class="log" aria-label="Переписка клиента"></ol>
+    <div id="quote" hidden></div>
+    <form id="send" class="row"><label class="grow">Сообщение клиента<input id="question" maxlength="1200" required></label><button class="action">Отправить</button></form>
+    <p id="client-error" class="notice" role="alert"></p>
+  </section>
+  <section class="pane" aria-labelledby="manager-title">
+    <header><p class="label">02 / Рабочее место</p><h2 id="manager-title">Панель менеджера</h2><p id="manager-status" role="status">Закрыто · нужен отдельный токен</p></header>
+    <form id="access" class="row"><label class="grow">Токен менеджера<input id="token" type="password" autocomplete="off" required></label><button>Открыть</button></form>
+    <button id="lock" type="button" hidden>Закрыть панель</button>
+    <div id="workspace" hidden>
+      <nav class="quick" aria-label="Разделы панели">
+        <button id="ops-tab" aria-controls="ops" aria-pressed="true">Эскалации и чат оператора</button>
+        <button id="inspect-tab" aria-controls="inspection" aria-pressed="false">Webim v2.0 &amp; Экономика</button>
+      </nav>
+      <section id="ops">
+        <label>Активные эскалации<select id="queue"></select></label>
+        <p id="details" class="detail"></p>
+        <ol id="manager-log" class="log" aria-label="Переписка выбранной эскалации"></ol>
+        <form id="reply" class="row"><label class="grow">Ответ менеджера<textarea id="answer" maxlength="1200" rows="2" required></textarea></label><button class="action">Ответить клиенту</button></form>
+        <button id="draft" type="button" disabled>Оформить ответ и добавить в БЗ</button>
+        <section id="preview" hidden><h3>Черновик для базы знаний</h3><p id="qa" class="detail"></p>
+          <p>Подтверди только обезличенный справочный текст.</p>
+          <div class="quick"><button class="action" id="confirm" type="button">Подтвердить публикацию</button><button id="discard" type="button">Отмена</button></div>
+        </section>
+      </section>
+      <section id="inspection" hidden>
+        <label>Диалог инспектора<select id="inspect-chat"><option value="client">Текущий клиентский диалог</option><option value="selected">Выбранная эскалация</option></select></label>
+        <h3>Юнит-экономика</h3><p id="metrics" class="detail"></p>
+        <h3>Последние JSON-пакеты и действия</h3><p class="label">Проекция v2: без текста, ссылок, контактов и токенов доступа</p><pre id="packets"></pre>
+      </section>
+    </div>
+    <p id="manager-error" class="notice" role="status"></p>
+  </section>
+</main>
+<footer>Не вводите реальные имена, контакты и сведения о клиентах.</footer>
+</body>
+</html>

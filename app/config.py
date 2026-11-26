@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     webim_bot_token: SecretStr | None = None
     webim_webhook_token: SecretStr | None = None
     manager_token: SecretStr | None = None
+    demo_enabled: bool = False
+    demo_embeddings: bool = False
     llm_base_url: str = 'https://api.openai.com/v1'
     llm_api_key: SecretStr | None = None
     llm_model: str = ''

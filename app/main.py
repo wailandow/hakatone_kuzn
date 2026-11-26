@@ -1,18 +1,24 @@
 """FastAPI entrypoint for the Webim adapter and quote downloads."""
 from contextlib import asynccontextmanager
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 
+from app import demo
 from app.agent.llm_client import Agent
 from app.agent.tools import AgentTools
 from app.config import Settings
 from app.db import connect, initialize
+from app.embeddings import E5Embedding
+from app.manager.routes import router as manager_router
 from app.webim import mock_server, webhook
 from app.webim.client import PDF_NAME, WebimClient
 from app.webim.schemas import matches
+
+FRONTEND = Path(__file__).resolve().parents[1] / 'frontend'
 
 
 def create_app(settings=None):
@@ -21,9 +27,13 @@ def create_app(settings=None):
         config = settings if settings is not None else Settings()
         if config.webim_bot_token and matches(config.webim_webhook_token, config.webim_bot_token.get_secret_value()):
             raise ValueError('Webim bot and webhook credentials must be distinct')
+        if config.demo_enabled and config.manager_token and any(matches(token, config.manager_token.get_secret_value())
+                for token in (config.webim_bot_token, config.webim_webhook_token)):
+            raise ValueError('Manager and Webim credentials must be distinct')
         initialize(config.db_path)
         service = WebimClient(config, transport=mock_transport(app, config))
-        tools = AgentTools(config, send_file=service.send_file, redirect_chat=service.redirect_chat)
+        embedder = E5Embedding() if config.demo_enabled and service.mock and config.demo_embeddings else None
+        tools = AgentTools(config, embedder=embedder, send_file=service.send_file, redirect_chat=service.redirect_chat)
         agent = Agent(config, tools)
         inbound = webhook.Webhook(config, agent, service)
         app.state.webim, app.state.agent, app.state.webhook = service, agent, inbound
@@ -39,6 +49,21 @@ def create_app(settings=None):
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.include_router(webhook.router)
     app.include_router(mock_server.router)
+    app.include_router(demo.router)
+    app.include_router(manager_router)
+
+    @app.get('/')
+    @app.get('/demo.js')
+    @app.get('/demo.css')
+    def demo_ui(request: Request):
+        demo.check_enabled(request)
+        name = request.url.path[1:] or 'index.html'
+        return FileResponse(FRONTEND / name, headers={
+            'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+            'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; "
+                                       "base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+            'Referrer-Policy': 'no-referrer',
+        })
 
     @app.get('/pdfs/{name}', include_in_schema=False)
     def quote_pdf(request: Request, name: str):

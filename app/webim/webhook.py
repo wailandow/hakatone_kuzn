@@ -17,6 +17,10 @@ router = APIRouter(include_in_schema=False)
 logger = logging.getLogger(__name__)
 
 
+class DemoScopeError(ValueError):
+    pass
+
+
 @router.post('/webhook/webim')
 @router.post('/webhook/webim/{secret}')
 async def webhook(request: Request, secret: str | None = None):
@@ -30,6 +34,8 @@ async def webhook(request: Request, secret: str | None = None):
         return JSONResponse({'error': 'incorrect-request'}, status_code=400)
     try:
         chat_id = await asyncio.to_thread(service.accept, event)
+    except DemoScopeError:
+        return JSONResponse({'error': 'unauthorized'}, status_code=403)
     except sqlite3.Error:
         return JSONResponse({'error': 'storage-unavailable'}, status_code=503)
     if chat_id is not None:
@@ -42,7 +48,7 @@ class Webhook:
         self.settings, self.agent, self.webim = settings, agent, webim
         self.workers = {}
 
-    def accept(self, event):
+    def accept(self, event, *, demo=False):
         assignment = isinstance(event, NewChat)
         chat_id = str(event.chat.id if assignment else event.chat_id)
         url = page_context(event.page_url or (event.chat.page_url if assignment else None))
@@ -55,6 +61,9 @@ class Webhook:
         records = []
         with connect(self.settings.db_path, timeout=.25) as db, db:
             db.execute('BEGIN IMMEDIATE')
+            reserved = db.execute('SELECT 1 FROM demo_chats WHERE chat_id=?', (chat_id,)).fetchone()
+            if bool(reserved) != demo or (self.settings.demo_enabled and self.webim.mock and not demo):
+                raise DemoScopeError
             first_empty_assignment = False
             if assignment:
                 db.execute('INSERT INTO chats(chat_id,page_url) VALUES (?,?) ON CONFLICT(chat_id) DO NOTHING',
@@ -109,7 +118,24 @@ class Webhook:
 
     def pending_chats(self):
         with connect(self.settings.db_path) as db:
-            return [row[0] for row in db.execute('SELECT DISTINCT chat_id FROM webim_inbox WHERE pending_text IS NOT NULL')]
+            return [row[0] for row in db.execute('''SELECT DISTINCT chat_id FROM webim_inbox
+                LEFT JOIN demo_chats USING(chat_id) WHERE pending_text IS NOT NULL
+                AND (demo_chats.chat_id IS NOT NULL) = ?''', (self.settings.demo_enabled and self.webim.mock,))]
+
+    def _usage_cursor(self, chat_id):
+        with connect(self.settings.db_path, timeout=.25) as db:
+            if db.execute('SELECT 1 FROM demo_chats WHERE chat_id=?', (chat_id,)).fetchone():
+                return db.execute("SELECT COALESCE(MAX(id),0) FROM audit_log WHERE chat_id=? AND event_type='llm_call'",
+                                  (chat_id,)).fetchone()[0]
+        return None
+
+    def _audit_turn(self, chat_id, cursor):
+        with connect(self.settings.db_path, timeout=.25) as db, db:
+            db.execute('''INSERT INTO audit_log(chat_id,event_type,prompt_tokens,completion_tokens,cost_usd)
+                SELECT ?, 'agent_turn', CASE WHEN COUNT(*)=COUNT(prompt_tokens) THEN SUM(prompt_tokens) END,
+                CASE WHEN COUNT(*)=COUNT(completion_tokens) THEN SUM(completion_tokens) END,
+                CASE WHEN COUNT(*)=COUNT(cost_usd) THEN SUM(cost_usd) END FROM audit_log
+                WHERE chat_id=? AND event_type='llm_call' AND id>?''', (chat_id, chat_id, cursor))
 
     def kick(self, chat_id):
         if chat_id in self.workers:
@@ -157,7 +183,13 @@ class Webhook:
                 history, page_url = turn
                 if not history:
                     continue
+                cursor = None
                 try:
+                    if self.settings.demo_enabled and self.webim.mock:
+                        try:
+                            cursor = await asyncio.to_thread(self._usage_cursor, chat_id)
+                        except sqlite3.Error:
+                            pass
                     reply = await self.agent.run(chat_id, history, page_url=page_url)
                     if reply:
                         await self.webim.send_text(chat_id, reply)
@@ -165,6 +197,12 @@ class Webhook:
                     continue  # Assignment/state changed before the send.
                 except Exception as exc:
                     self.agent.tools.audit(chat_id, 'error', {'stage': 'webim_turn', 'exception': type(exc).__name__})
+                finally:
+                    if cursor is not None:
+                        try:
+                            await asyncio.to_thread(self._audit_turn, chat_id, cursor)
+                        except sqlite3.Error as exc:
+                            logger.warning('Demo turn audit failed (%s)', type(exc).__name__)
         finally:
             self.workers.pop(chat_id, None)
 

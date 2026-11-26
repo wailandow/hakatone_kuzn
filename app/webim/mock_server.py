@@ -48,10 +48,16 @@ def is_loopback(request):
         return False
 
 
+def in_mock_scope(db, service, chat_id):
+    demo = db.execute('SELECT 1 FROM demo_chats WHERE chat_id=?', (str(chat_id),)).fetchone()
+    return bool(demo) == service.settings.demo_enabled
+
+
 def store_message(service, data):
     with connect(service.settings.db_path, timeout=.25) as db, db:
         db.execute('BEGIN IMMEDIATE')
-        if not db.execute("SELECT 1 FROM chats WHERE chat_id=? AND status='bot'", (str(data.chat_id),)).fetchone():
+        if (not in_mock_scope(db, service, data.chat_id) or not db.execute(
+                "SELECT 1 FROM chats WHERE chat_id=? AND status='bot'", (str(data.chat_id),)).fetchone()):
             return mock_error('chat-not-found')
         message = data.message
         url = message.data.url if message.kind == 'file_operator' else None
@@ -65,7 +71,7 @@ def handoff(service, data):
     with connect(service.settings.db_path, timeout=.25) as db, db:
         db.execute('BEGIN IMMEDIATE')
         row = db.execute('SELECT status FROM chats WHERE chat_id=?', (str(data.chat_id),)).fetchone()
-        if not row or row['status'] not in ('escalated', 'manager'):
+        if not in_mock_scope(db, service, data.chat_id) or not row or row['status'] not in ('escalated', 'manager'):
             return mock_error('chat-not-found')
         db.execute("UPDATE chats SET status='manager' WHERE chat_id=? AND status='escalated'", (str(data.chat_id),))
     return {'result': 'ok'}
