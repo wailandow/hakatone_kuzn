@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS offers (
 CREATE INDEX IF NOT EXISTS offers_group ON offers(group_id);
 CREATE INDEX IF NOT EXISTS offers_vendor ON offers(vendor);
 CREATE INDEX IF NOT EXISTS offers_vendor_code ON offers(vendor_code);
+CREATE INDEX IF NOT EXISTS offers_vendor_code_nocase ON offers(vendor_code COLLATE NOCASE, id);
 CREATE INDEX IF NOT EXISTS offers_registry ON offers(is_russian_registry);
 CREATE VIRTUAL TABLE IF NOT EXISTS offers_fts USING fts5(offer_id UNINDEXED,name,vendor,vendor_code,description,search_text);
 CREATE TRIGGER IF NOT EXISTS offers_ai AFTER INSERT ON offers BEGIN
