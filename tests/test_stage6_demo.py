@@ -38,6 +38,14 @@ class DemoTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('fixture-manager', page.text)
         self.assertEqual((await self.http.get('/demo.js')).status_code, 200)
 
+    async def test_client_page_keeps_only_quote_and_handoff_quick_actions(self):
+        page = await self.http.get('/')
+        self.assertEqual(page.status_code, 200)
+        self.assertNotIn('>Тестовый пилот</button>', page.text)
+        self.assertNotIn('>Товары</button>', page.text)
+        self.assertIn('>КП</button>', page.text)
+        self.assertIn('>Эскалация</button>', page.text)
+
     async def test_quote_confirmation_requires_both_chat_capability_and_exact_proposal(self):
         chat, auth = await self.new()
         other, _ = await self.new()
