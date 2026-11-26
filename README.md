@@ -196,3 +196,45 @@ UI использует тот же валидатор и FIFO Webim внутр�
 считаются только по ходам с измерением; стоимость в USD доступна с обоими
 заданными тарифами, в ₽ — дополнительно с `USD_TO_RUB`. Неизвестные значения
 не заменяются нулями; генерация черновика учитывается отдельным типом аудита.
+
+## Eval, экономика и деплой (этап 7)
+
+### Прогон eval-выборки (`scripts/run_eval.py`)
+
+Запуск по `data/mined/eval_set.json` с реальным `Agent` (требуются `LLM_API_KEY` и `LLM_MODEL` в `.env`):
+
+```sh
+python -m scripts.run_eval --db data/app.db --out data/eval_report.json
+```
+
+Опции: `--limit N`, `--db <path>`, `--eval-file <path>`, `--out <path>`, `--offline`.
+В режиме `--offline` выполняется локальный dry-run без обращений к внешнему LLM: отчёт явно помечается `mode="offline_dry_run"` и `dry_run=true`, а поля токенов и стоимости остаются `null` (метрики LLM не фабрикуются). Файл `data/eval_report.json` игнорируется Git.
+
+### Выгрузка юнит-экономики (`scripts/export_cost_stats.py`)
+
+```sh
+python -m scripts.export_cost_stats --db data/app.db --format markdown
+python -m scripts.export_cost_stats --db data/app.db --usd-to-rub 95 --format json --csv data/cost_stats.csv
+```
+
+Скрипт читает `audit_log` (по умолчанию `agent_turn`, при отсутствии — `llm_call`), выводит число запросов, среднее/p50/p95 по токенам и задержке, среднюю и суммарную стоимость в USD и RUB. Пустая БД и пропущенные измерения обрабатываются без деления на ноль (`n/a` / `null`).
+
+### Нативный деплой на Debian VPS (`systemd` + `nginx`)
+
+Конфигурации лежат в `deploy/softline-agent.service` и `deploy/nginx-softline-agent.conf`:
+
+```sh
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin softline
+sudo chown -R softline:softline /opt/softline-agent/data
+sudo chown root:softline /opt/softline-agent/.env && sudo chmod 640 /opt/softline-agent/.env
+
+sudo cp deploy/softline-agent.service /etc/systemd/system/softline-agent.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now softline-agent
+
+sudo cp deploy/nginx-softline-agent.conf /etc/nginx/sites-available/softline-agent
+sudo ln -sf /etc/nginx/sites-available/softline-agent /etc/nginx/sites-enabled/softline-agent
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Юнит запускает `/opt/softline-agent/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 --no-access-log` с `ProtectSystem=strict` и записью только в `/opt/softline-agent/data`. Nginx проксирует порт 80 на `127.0.0.1:8000` с `proxy_read_timeout 120s`, блокирует `/mock-webim/` снаружи и отключает `access_log` на `/webhook/webim/`.
