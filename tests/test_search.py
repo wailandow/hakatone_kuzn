@@ -21,6 +21,42 @@ class SearchTests(unittest.TestCase):
             self.conn.execute('''INSERT INTO offers(id,name,vendor_code,group_id,vendor,is_russian_registry,embedding)
                                  VALUES (?,?,?,?,?,?,?)''', (id_, name, sku, group, vendor, russian, blob))
 
+    def test_catalog_default_synonyms_are_used_unless_explicitly_overridden(self):
+        import json
+        from unittest.mock import patch
+
+        self.offer('red', 'RedCheck')
+        self.offer('alternative', 'Другое название')
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / 'synonyms.json'
+            path.write_text(json.dumps({'ред чек': 'RedCheck'}), encoding='utf-8')
+            with patch.object(db, 'CATALOG_SYNONYMS_PATH', path, create=True):
+                self.assertEqual([row['id'] for row in db.search_catalog(self.conn, 'ред чек')], ['red'])
+                self.assertEqual(db.search_catalog(self.conn, 'ред чек', synonyms={}), [])
+                found = db.search_catalog(self.conn, 'ред чек', synonyms={'ред чек': 'Другое название'})
+                self.assertEqual([row['id'] for row in found], ['alternative'])
+                path.unlink()
+                self.assertEqual(db.search_catalog(self.conn, 'ред чек'), [])
+
+    def test_default_synonym_does_not_duplicate_already_canonical_product_tokens(self):
+        import json
+        from unittest.mock import patch
+
+        self.offer('astra', 'Astra Linux')
+
+        class QueryEmbedder:
+            def query(self, text):
+                if text != 'Astra Linux':
+                    raise AssertionError(f'expected Astra Linux, got {text}')
+                return [1, 0]
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / 'synonyms.json'
+            path.write_text(json.dumps({'astra': 'Astra Linux'}), encoding='utf-8')
+            with patch.object(db, 'CATALOG_SYNONYMS_PATH', path, create=True):
+                rows = db.search_catalog(self.conn, 'Astra Linux', embedder=QueryEmbedder())
+                self.assertEqual([row['id'] for row in rows], ['astra'])
+
     def test_literal_sku_synonym_and_fts_syntax(self):
         self.offer('exact', 'Сканер', sku='SCANER-VS-7-8192-E-F')
         self.offer('partial', 'Сканер', sku='SCANER-VS-7-8192-E-F-PLUS')

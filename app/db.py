@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+import json
 from pathlib import Path
 import re
 import sqlite3
@@ -34,6 +35,28 @@ _OFFER_FIELDS = '''doc.id, doc.group_id, doc.vendor, doc.vendor_code, doc.name, 
     CASE WHEN doc.group_id IS NULL THEN 0 ELSE
         (SELECT count(*) - 1 FROM offers AS variant WHERE variant.group_id = doc.group_id)
     END AS variant_count'''
+
+
+CATALOG_SYNONYMS_PATH = Path(__file__).resolve().parents[1] / 'data' / 'mined' / 'synonyms.json'
+
+
+def _load_catalog_synonyms(path):
+    try:
+        synonyms = json.loads(path.read_text(encoding='utf-8'))
+    except FileNotFoundError:
+        return {}
+    except (UnicodeError, json.JSONDecodeError):
+        raise ValueError('invalid catalog synonyms JSON') from None
+    if not isinstance(synonyms, dict) or any(
+            not isinstance(value, str) or not _TOKEN.search(key) or not _TOKEN.search(value)
+            for key, value in synonyms.items()):
+        raise ValueError('catalog synonyms must map nonempty phrases to nonempty phrases')
+    # A short alias can prefix its canonical form (e.g. astra → Astra Linux).
+    # Match the full form first without changing explicit override behavior.
+    alias_keys = {tuple(_TOKEN.findall(key.casefold())) for key in synonyms}
+    canonical = {value: value for value in synonyms.values()
+                 if tuple(_TOKEN.findall(value.casefold())) not in alias_keys}
+    return canonical | synonyms
 
 
 def _normalize_query(query, synonyms):
@@ -136,6 +159,8 @@ def search_catalog(db, query, *, group_id=None, vendor=None, russian_only=False,
     exact_ids = [row[0] for row in db.execute(f'''SELECT doc.id FROM offers AS doc
         WHERE doc.vendor_code = ? COLLATE NOCASE {filters}
         ORDER BY doc.id LIMIT ?''', [original, *params, limit])]
+    if synonyms is None:
+        synonyms = _load_catalog_synonyms(CATALOG_SYNONYMS_PATH)
     normalized = _normalize_query(query, synonyms)
     match = _match_expression(normalized)
     if not match:
