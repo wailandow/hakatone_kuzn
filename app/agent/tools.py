@@ -14,6 +14,7 @@ from app.pdf.kp_generator import QuoteLine, generate_pdf
 
 DEFAULT_PAYMENT = 'Предоплата 100%'
 DEFAULT_DELIVERY = 'В соответствии с условиями поставки вендора (обычно 1-5 рабочих дней)'
+MANAGER_REPLY = 'Подключу менеджера, чтобы он помог с вашим запросом.'
 TRANSPORT_TIMEOUT = 8.0
 MAX_QUOTE_ITEMS = 12
 MAX_QUOTE_QUANTITY = 1_000_000
@@ -107,11 +108,12 @@ def _active(conn, chat_id):
 
 
 class AgentTools:
-    def __init__(self, settings, *, embedder=None, send_file=None, redirect_chat=None):
+    def __init__(self, settings, *, embedder=None, send_file=None, redirect_chat=None, send_text=None):
         self.settings = settings
         self.embedder = embedder
         self.send_file = send_file  # async (chat_id, public_url)
         self.redirect_chat = redirect_chat  # async (chat_id)
+        self.send_text = send_text  # async (chat_id, text)
 
     def audit(self, chat_id, event_type, payload, *, prompt_tokens=None, completion_tokens=None,
               cost_usd=None, latency_ms=None):
@@ -330,6 +332,15 @@ class AgentTools:
             return {'error': 'INVALID_ARGUMENTS'}
         if len(payload) > 4000:
             return {'error': 'INVALID_ARGUMENTS'}
+        if self.send_text is not None:
+            with db.connect(self.settings.db_path, timeout=2) as conn:
+                notify = _active(conn, chat_id)
+            if notify:
+                try:
+                    async with asyncio.timeout(TRANSPORT_TIMEOUT):
+                        await self.send_text(chat_id, MANAGER_REPLY)
+                except Exception as exc:
+                    self.audit(chat_id, 'error', {'stage': 'escalate_notice', 'exception': type(exc).__name__})
         with db.connect(self.settings.db_path, timeout=2) as conn, conn:
             changed = conn.execute("UPDATE chats SET status='escalated' WHERE chat_id=? AND status='bot'", (chat_id,))
             if changed.rowcount:

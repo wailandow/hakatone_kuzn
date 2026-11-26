@@ -273,3 +273,29 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
         result = await self.call()
         self.assertEqual(result.get('error'), 'QUOTE_ITEM_TOO_LONG')
         self.assertIsNone(self.tools.pending_quote('a'))
+
+    async def test_escalation_notifies_customer_before_redirect_and_tolerates_notice_failure(self):
+        events = []
+
+        async def send_text(chat_id, text):
+            events.append(('send_text', chat_id, text))
+
+        async def redirect(chat_id):
+            events.append(('redirect', chat_id))
+
+        tools = AgentTools(self.settings, send_file=self.files, redirect_chat=redirect, send_text=send_text)
+        args = {'reason': 'OEM_MISSING', 'summary': 'Нужен OEM', 'collected_slots': {'product': 'Astra Linux'}}
+        for _ in range(2):
+            self.assertEqual((await tools.execute('a', 'escalate_to_manager', args))['status'], 'escalated')
+        self.assertEqual([e[0] for e in events], ['send_text', 'redirect'])
+
+        with connect(self.settings.db_path) as db, db:
+            db.execute("INSERT INTO chats(chat_id,status) VALUES ('c','bot')")
+
+        async def broken_send(chat_id, text):
+            raise OSError('temporary send error')
+
+        tools_err = AgentTools(self.settings, send_file=self.files, redirect_chat=redirect, send_text=broken_send)
+        self.assertEqual((await tools_err.execute('c', 'escalate_to_manager', args))['status'], 'escalated')
+        self.assertEqual(self.rows("SELECT status FROM chats WHERE chat_id='c'")[0][0], 'escalated')
+        self.assertIn(('redirect', 'c'), events)

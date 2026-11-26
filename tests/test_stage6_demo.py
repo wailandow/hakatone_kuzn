@@ -76,9 +76,12 @@ class DemoTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(state['status'], 'manager')
         self.assertEqual(state['mode'], 'offline')
         self.assertEqual(state['page_url'], 'https://store.softline.ru/redsoft/red-os-1/')
+        self.assertEqual(state['messages'][-1]['sender'], 'bot')
+        self.assertIn('менеджер', state['messages'][-1]['text'].lower())
         with connect(self.app.state.webim.settings.db_path) as db:
             events = [row[0] for row in db.execute('SELECT payload_json FROM audit_log WHERE chat_id=?', (chat,))]
         self.assertTrue(any('new_message' in event for event in events))
+        self.assertTrue(any('send_message' in event and 'delivered' in event for event in events))
         self.assertTrue(any('redirect_chat' in event and 'delivered' in event for event in events))
         self.assertFalse(any('тестовый пилот' in event for event in events))
 

@@ -138,3 +138,19 @@ class SearchTests(unittest.TestCase):
             with self.subTest(query=query):
                 rows = db.search_kb(self.conn, query, **options)
                 self.assertEqual([(row['title'], row['source']) for row in rows], [('Активация', 'manager_added')])
+
+    def test_leading_product_name_outranks_compatible_third_party_software(self):
+        self.offer('gis', 'Панорама КБ ГИС Мини, ОС Astra Linux Special Edition, Смоленск', vendor='Панорама КБ')
+        self.offer('os', 'Astra Linux Special Edition 1.7, x86-64, «Максимальный» («Смоленск»), РУСБ.10015-01 (МО), BOX',
+                   vendor='Группа Астра')
+        rows = db.search_catalog(self.conn, 'Astra Linux Special Edition Смоленск', limit=2)
+        self.assertEqual(rows[0]['id'], 'os')
+
+    def test_builtin_astra_se_alias_and_relaxed_prefix_fallback(self):
+        self.offer('gis', 'Панорама КБ Panorama SE, ОС Astra Linux SE, Смоленск', vendor='Панорама КБ')
+        self.offer('os', 'Astra Linux Special Edition 1.7, «Максимальный» («Смоленск»), РУСБ.10015-01 (МО), BOX',
+                   vendor='Группа Астра')
+        self.offer('win', 'Утилита для Windows', vendor='Другой')
+        self.assertEqual(db.search_catalog(self.conn, 'Astra Linux SE', limit=1)[0]['id'], 'os')
+        self.assertEqual(db.search_catalog(self.conn, 'Astra Linux Смоленск OEM', limit=1)[0]['id'], 'os')
+        self.assertEqual(db.search_catalog(self.conn, 'НесуществующийПродукт Windows', limit=5), [])

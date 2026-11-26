@@ -45,25 +45,29 @@ _OFFER_FIELDS = '''doc.id, doc.group_id, doc.vendor, doc.vendor_code, doc.name, 
 
 
 CATALOG_SYNONYMS_PATH = Path(__file__).resolve().parents[1] / 'data' / 'mined' / 'synonyms.json'
+_BUILTIN_CATALOG_SYNONYMS = {
+    'astra linux se': 'Astra Linux Special Edition',
+}
 
 
 def _load_catalog_synonyms(path):
     try:
         synonyms = json.loads(path.read_text(encoding='utf-8'))
     except FileNotFoundError:
-        return {}
+        synonyms = {}
     except (UnicodeError, json.JSONDecodeError):
         raise ValueError('invalid catalog synonyms JSON') from None
     if not isinstance(synonyms, dict) or any(
             not isinstance(value, str) or not _TOKEN.search(key) or not _TOKEN.search(value)
             for key, value in synonyms.items()):
         raise ValueError('catalog synonyms must map nonempty phrases to nonempty phrases')
+    merged = _BUILTIN_CATALOG_SYNONYMS | synonyms
     # A short alias can prefix its canonical form (e.g. astra → Astra Linux).
     # Match the full form first without changing explicit override behavior.
-    alias_keys = {tuple(_TOKEN.findall(key.casefold())) for key in synonyms}
-    canonical = {value: value for value in synonyms.values()
+    alias_keys = {tuple(_TOKEN.findall(key.casefold())) for key in merged}
+    canonical = {value: value for value in merged.values()
                  if tuple(_TOKEN.findall(value.casefold())) not in alias_keys}
-    return canonical | synonyms
+    return canonical | merged
 
 
 def _normalize_query(query, synonyms):
@@ -79,8 +83,31 @@ def _normalize_query(query, synonyms):
     return re.sub(pattern, lambda match: normalized[tuple(_TOKEN.findall(match[0]))], query.casefold()).strip()
 
 
+def _match_tokens(query):
+    return list(dict.fromkeys(_TOKEN.findall(query)))
+
+
 def _match_expression(query):
-    return ' AND '.join(f'"{token}"' for token in dict.fromkeys(_TOKEN.findall(query)))
+    return ' AND '.join(f'"{token}"' for token in _match_tokens(query))
+
+
+def _prefix_match_expression(tokens):
+    head = f'name:^"{tokens[0]}"'
+    if len(tokens) == 1:
+        return head
+    return head + ' AND ' + ' AND '.join(f'"{token}"' for token in tokens[1:])
+
+
+def _prefix_or_expression(tokens):
+    rest = ' OR '.join(f'"{token}"' for token in tokens[1:])
+    return f'name:^"{tokens[0]}" AND ({rest})'
+
+
+def _fts_catalog_ids(db, expr, filters, params, limit):
+    return [row[0] for row in db.execute(f'''SELECT doc.id
+        FROM offers_fts JOIN offers AS doc ON doc.rowid = offers_fts.rowid
+        WHERE offers_fts MATCH ? {filters}
+        ORDER BY bm25(offers_fts, 0, 5, 2, 8, 1, 1), doc.id LIMIT ?''', [expr, *params, limit])]
 
 
 def _catalog_filters(group_id, vendor, russian_only):
@@ -179,17 +206,21 @@ def search_catalog(db, query, *, group_id=None, vendor=None, russian_only=False,
     if synonyms is None:
         synonyms = _load_catalog_synonyms(CATALOG_SYNONYMS_PATH)
     normalized = _normalize_query(query, synonyms)
-    match = _match_expression(normalized)
-    if not match:
+    tokens = _match_tokens(normalized)
+    if not tokens:
         return _get_rows(db, 'offers', _OFFER_FIELDS, exact_ids)
     _check_search_cancelled(cancelled)
     vector = _query_vector(normalized, embedder, query_vector)
     _check_search_cancelled(cancelled)
     candidates = max(50, limit) if vector is not None else limit
-    lexical_ids = [row[0] for row in db.execute(f'''SELECT doc.id
-        FROM offers_fts JOIN offers AS doc ON doc.rowid = offers_fts.rowid
-        WHERE offers_fts MATCH ? {filters}
-        ORDER BY bm25(offers_fts, 0, 5, 2, 8, 1, 1), doc.id LIMIT ?''', [match, *params, candidates])]
+    prefix_ids = _fts_catalog_ids(db, _prefix_match_expression(tokens), filters, params, candidates)
+    if len(prefix_ids) < candidates:
+        regular_ids = _fts_catalog_ids(db, ' AND '.join(f'"{token}"' for token in tokens), filters, params, candidates)
+        lexical_ids = list(dict.fromkeys(prefix_ids + regular_ids))[:candidates]
+    else:
+        lexical_ids = prefix_ids
+    if not exact_ids and not lexical_ids and len(tokens) >= 2:
+        lexical_ids = _fts_catalog_ids(db, _prefix_or_expression(tokens), filters, params, candidates)
     ranked_ids = lexical_ids
     if vector is not None:
         dense = _dense_ids(db, 'offers', filters, params, vector, candidates, cancelled)

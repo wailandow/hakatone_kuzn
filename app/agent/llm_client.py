@@ -12,7 +12,7 @@ from openai import AsyncOpenAI
 
 from app.db import connect
 from app.agent.prompts import SYSTEM_PROMPT
-from app.agent.tools import TOOL_SCHEMAS
+from app.agent.tools import MANAGER_REPLY, TOOL_SCHEMAS
 
 MAX_STEPS = 5
 MAX_TOOLS_PER_STEP = 8
@@ -22,7 +22,6 @@ MAX_COMPLETION_TOKENS = 1024
 MAX_TOOL_RESULT_BYTES = 8_000
 MAX_TOOL_CALL_BYTES = 12_000
 MAX_HISTORY_MESSAGES = 16
-MANAGER_REPLY = 'Подключу менеджера, чтобы он помог с вашим запросом.'
 REDIRECT_FAILED_REPLY = 'Запрос сохранён для менеджера, но перевести чат автоматически не удалось.'
 LOCAL_HANDOFF_REPLY = 'Запрос сохранён для менеджера.'
 HANDOFF_FAILED_REPLY = 'Не удалось подключить менеджера автоматически. Пожалуйста, попробуйте ещё раз позже.'

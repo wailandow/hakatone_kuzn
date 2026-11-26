@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import tempfile
 import unittest
@@ -103,9 +104,11 @@ class WebimTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.hook(self.message('two', 'Уточнение для менеджера'))).status_code, 200)
         await self.wait_for(lambda: not self.app.state.webhook.workers)
         self.assertEqual(calls, [])
-        self.assertEqual(self.rows('SELECT sender FROM messages ORDER BY id'), [('client',), ('client',)])
+        self.assertEqual(self.rows('SELECT sender FROM messages ORDER BY id'), [('client',), ('bot',), ('client',)])
+        self.assertIn('менеджер', self.rows("SELECT text FROM messages WHERE sender='bot'")[0][0].lower())
         self.assertEqual(len(self.rows('SELECT id FROM escalations')), 1)
-        self.assertIn('redirect_chat', repr(self.rows("SELECT payload_json FROM audit_log WHERE event_type='webim_out'")))
+        out_events = [row[0] for row in self.rows("SELECT payload_json FROM audit_log WHERE event_type='webim_out' ORDER BY id")]
+        self.assertEqual([json.loads(e)['command'] for e in out_events], ['send_message', 'redirect_chat'])
         self.assertNotIn('webim_turn', repr(self.rows("SELECT payload_json FROM audit_log WHERE event_type='error'")))
 
     async def test_authenticated_reassignment_resumes_next_turn(self):
@@ -133,7 +136,10 @@ class WebimTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.hook(self.message('two', 'Вернулся'))).status_code, 200)
         await self.wait_for(lambda: not self.app.state.webhook.workers)
         self.assertEqual(calls, ['Вернулся'])
-        self.assertEqual(self.rows("SELECT text FROM messages WHERE sender='bot'"), [('Ответ',)])
+        self.assertEqual(self.rows("SELECT text FROM messages WHERE sender='bot' ORDER BY id"), [
+            ('Подключу менеджера, чтобы он помог с вашим запросом.',),
+            ('Ответ',),
+        ])
 
         await self.app.state.agent.tools.escalate_to_manager('42', 'reason', 'summary', {})
         self.assertEqual((await self.hook(reassignment)).status_code, 200)  # replay after second handoff

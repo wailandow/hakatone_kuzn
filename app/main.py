@@ -33,7 +33,8 @@ def create_app(settings=None):
         initialize(config.db_path)
         service = WebimClient(config, transport=mock_transport(app, config))
         embedder = E5Embedding() if config.demo_enabled and service.mock and config.demo_embeddings else None
-        tools = AgentTools(config, embedder=embedder, send_file=service.send_file, redirect_chat=service.redirect_chat)
+        tools = AgentTools(config, embedder=embedder, send_file=service.send_file,
+                           redirect_chat=service.redirect_chat, send_text=service.send_text)
         agent = Agent(config, tools)
         inbound = webhook.Webhook(config, agent, service)
         app.state.webim, app.state.agent, app.state.webhook = service, agent, inbound
