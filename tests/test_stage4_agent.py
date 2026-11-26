@@ -233,7 +233,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             self.assertLessEqual(len(json.dumps(args['messages'], ensure_ascii=False)), 24_000)
             self.assertFalse(any('old marker 0:' in str(item) for item in args['messages']))
             self.assertIn('Newest request', str(args['messages']))
-            self.assertEqual(args.get('max_tokens'), 1024)
+            self.assertEqual(args.get('max_tokens'), 4096)
         result = json.loads(self.create.await_args.kwargs['messages'][-1]['content'])
         self.assertTrue(result[0]['content'].startswith('Полезный ответ'))
         self.assertLessEqual(len(result[0]['content']), 1200)
