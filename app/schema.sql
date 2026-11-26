@@ -86,4 +86,15 @@ CREATE TABLE IF NOT EXISTS audit_log (
  cost_usd REAL, latency_ms INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS audit_type_chat ON audit_log(event_type,chat_id);
+CREATE TABLE IF NOT EXISTS webim_visitors (
+ chat_id TEXT PRIMARY KEY NOT NULL REFERENCES chats(chat_id), visitor_fingerprint TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS webim_empty_assignments (
+ chat_id TEXT PRIMARY KEY NOT NULL REFERENCES chats(chat_id)
+);
+CREATE TABLE IF NOT EXISTS webim_inbox (
+ seq INTEGER PRIMARY KEY, chat_id TEXT NOT NULL REFERENCES chats(chat_id),
+ message_id TEXT NOT NULL UNIQUE, pending_text TEXT, pending_page_url TEXT
+);
+CREATE INDEX IF NOT EXISTS webim_inbox_pending ON webim_inbox(chat_id,seq) WHERE pending_text IS NOT NULL;
 COMMIT;
