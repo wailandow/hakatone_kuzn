@@ -68,7 +68,17 @@ CREATE TABLE IF NOT EXISTS escalations (
 CREATE TABLE IF NOT EXISTS quotes (
  id TEXT PRIMARY KEY NOT NULL, chat_id TEXT NOT NULL REFERENCES chats(chat_id), items_json TEXT NOT NULL,
  discount_percent REAL NOT NULL CHECK(discount_percent BETWEEN 0 AND 5), total_sum REAL NOT NULL,
- pdf_url TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+ pdf_url TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ total_sum_kopecks INTEGER CHECK(total_sum_kopecks IS NULL OR (typeof(total_sum_kopecks)='integer'
+  AND total_sum_kopecks BETWEEN 1 AND 1000000000000))
+);
+CREATE TABLE IF NOT EXISTS escalation_redirects (
+ chat_id TEXT PRIMARY KEY NOT NULL REFERENCES chats(chat_id),
+ status TEXT NOT NULL CHECK(status IN ('pending','sent'))
+);
+CREATE TABLE IF NOT EXISTS quote_confirmations (
+ chat_id TEXT PRIMARY KEY NOT NULL REFERENCES chats(chat_id), confirmation_id TEXT NOT NULL UNIQUE,
+ proposal_json TEXT NOT NULL, confirmed INTEGER NOT NULL DEFAULT 0 CHECK(confirmed IN (0,1))
 );
 CREATE TABLE IF NOT EXISTS audit_log (
  id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id TEXT, event_type TEXT NOT NULL,

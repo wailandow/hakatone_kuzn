@@ -1,4 +1,4 @@
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 import json
 from pathlib import Path
 import re
@@ -10,8 +10,8 @@ from app.embeddings import VECTOR_DTYPE
 
 
 @contextmanager
-def connect(path):
-    db = sqlite3.connect(path, timeout=15)
+def connect(path, *, timeout=15):
+    db = sqlite3.connect(path, timeout=timeout)
     try:
         db.row_factory = sqlite3.Row
         db.execute('PRAGMA foreign_keys = ON')
@@ -27,6 +27,13 @@ def initialize(path):
     path.parent.mkdir(parents=True, exist_ok=True)
     with connect(path) as db:
         db.executescript(Path(__file__).with_name('schema.sql').read_text(encoding='utf-8'))
+        with db:
+            db.execute('BEGIN IMMEDIATE')
+            if not any(row['name'] == 'total_sum_kopecks' for row in db.execute('PRAGMA table_info(quotes)')):
+                # The legacy REAL amount may already have lost precision; do not backfill it.
+                db.execute('''ALTER TABLE quotes ADD COLUMN total_sum_kopecks INTEGER
+                    CHECK(total_sum_kopecks IS NULL OR (typeof(total_sum_kopecks)='integer'
+                          AND total_sum_kopecks BETWEEN 1 AND 1000000000000))''')
 
 
 _TOKEN = re.compile(r'[^\W_]+')
@@ -86,7 +93,13 @@ def _catalog_filters(group_id, vendor, russian_only):
     return ''.join(' AND ' + clause for clause in clauses), params
 
 
-def _dense_ids(db, table, filters, params, vector, limit):
+def _check_search_cancelled(cancelled):
+    if cancelled is not None and cancelled():
+        raise InterruptedError('search cancelled')
+
+
+def _dense_ids(db, table, filters, params, vector, limit, cancelled=None):
+    _check_search_cancelled(cancelled)
     vector = np.asarray(vector, dtype=np.float64)
     if vector.ndim != 1 or not vector.size or not np.isfinite(vector).all():
         raise ValueError('query_vector must be a finite one-dimensional nonempty vector')
@@ -100,17 +113,20 @@ def _dense_ids(db, table, filters, params, vector, limit):
         WHERE typeof(doc.embedding) = 'blob' AND length(doc.embedding) = ? {filters}
         ORDER BY doc.id''', [byte_count, *params])
     best = []
-    while batch := cursor.fetchmany(2048):
-        matrix = np.frombuffer(b''.join(row[1] for row in batch), dtype=VECTOR_DTYPE).reshape(-1, vector.size)
-        finite = np.flatnonzero(np.isfinite(matrix).all(axis=1))
-        matrix = matrix[finite].astype(np.float64)
-        norms = np.linalg.norm(matrix, axis=1)
-        valid = norms > 0
-        scores = (matrix[valid] @ vector) / norms[valid]
-        ids = [batch[i][0] for i in finite[valid]]
-        top = np.argsort(-scores, kind='stable')[:limit]
-        best.extend((-float(scores[i]), ids[i]) for i in top)
-        best = sorted(best)[:limit]
+    with closing(cursor):
+        while batch := cursor.fetchmany(2048):
+            _check_search_cancelled(cancelled)
+            matrix = np.frombuffer(b''.join(row[1] for row in batch), dtype=VECTOR_DTYPE).reshape(-1, vector.size)
+            finite = np.flatnonzero(np.isfinite(matrix).all(axis=1))
+            matrix = matrix[finite].astype(np.float64)
+            norms = np.linalg.norm(matrix, axis=1)
+            valid = norms > 0
+            scores = (matrix[valid] @ vector) / norms[valid]
+            ids = [batch[i][0] for i in finite[valid]]
+            top = np.argsort(-scores, kind='stable')[:limit]
+            best.extend((-float(scores[i]), ids[i]) for i in top)
+            best = sorted(best)[:limit]
+            _check_search_cancelled(cancelled)
     return [id_ for _, id_ in best]
 
 
@@ -142,11 +158,12 @@ def _query_vector(normalized, embedder, query_vector):
 
 
 def search_catalog(db, query, *, group_id=None, vendor=None, russian_only=False,
-                   limit=6, synonyms=None, embedder=None, query_vector=None):
+                   limit=6, synonyms=None, embedder=None, query_vector=None, cancelled=None):
     """Pin exact SKU matches, then fuse BM25 and optional E5 cosine rankings.
 
     An empty query with group_id lists that group's variants.
     """
+    _check_search_cancelled(cancelled)
     if limit <= 0:
         return []
     filters, params = _catalog_filters(group_id, vendor, russian_only)
@@ -165,7 +182,9 @@ def search_catalog(db, query, *, group_id=None, vendor=None, russian_only=False,
     match = _match_expression(normalized)
     if not match:
         return _get_rows(db, 'offers', _OFFER_FIELDS, exact_ids)
+    _check_search_cancelled(cancelled)
     vector = _query_vector(normalized, embedder, query_vector)
+    _check_search_cancelled(cancelled)
     candidates = max(50, limit) if vector is not None else limit
     lexical_ids = [row[0] for row in db.execute(f'''SELECT doc.id
         FROM offers_fts JOIN offers AS doc ON doc.rowid = offers_fts.rowid
@@ -173,22 +192,24 @@ def search_catalog(db, query, *, group_id=None, vendor=None, russian_only=False,
         ORDER BY bm25(offers_fts, 0, 5, 2, 8, 1, 1), doc.id LIMIT ?''', [match, *params, candidates])]
     ranked_ids = lexical_ids
     if vector is not None:
-        dense = _dense_ids(db, 'offers', filters, params, vector, candidates)
+        dense = _dense_ids(db, 'offers', filters, params, vector, candidates, cancelled)
         ranked_ids = _fuse(lexical_ids, dense, limit)
     ids = list(dict.fromkeys(exact_ids + ranked_ids))[:limit]
     return _get_rows(db, 'offers', _OFFER_FIELDS, ids)
 
 
-def search_kb(db, query, *, limit=4, embedder=None, query_vector=None):
+def search_kb(db, query, *, limit=4, embedder=None, query_vector=None, cancelled=None):
     """Search all knowledge sources, including newly committed manager articles."""
+    _check_search_cancelled(cancelled)
     match = _match_expression(query)
     if not match or limit <= 0:
         return []
     vector = _query_vector(query.strip(), embedder, query_vector)
+    _check_search_cancelled(cancelled)
     candidates = max(50, limit) if vector is not None else limit
     lexical = [row[0] for row in db.execute('''SELECT doc.id FROM kb_fts
         JOIN kb_articles AS doc ON doc.id = kb_fts.rowid WHERE kb_fts MATCH ?
         ORDER BY bm25(kb_fts, 0, 4, 1), doc.id LIMIT ?''', [match, candidates])]
     if vector is not None:
-        lexical = _fuse(lexical, _dense_ids(db, 'kb_articles', '', [], vector, candidates), limit)
+        lexical = _fuse(lexical, _dense_ids(db, 'kb_articles', '', [], vector, candidates, cancelled), limit)
     return _get_rows(db, 'kb_articles', 'doc.id, doc.title, doc.url, doc.content, doc.source', lexical)

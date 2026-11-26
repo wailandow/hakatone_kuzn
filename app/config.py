@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     llm_model: str = ''
     llm_fast_model: str = ''
     llm_proxy: SecretStr | None = None
-    llm_price_in_per_1m: float = Field(0, ge=0)
-    llm_price_out_per_1m: float = Field(0, ge=0)
-    usd_to_rub: float = Field(0, ge=0)
+    llm_price_in_per_1m: float = Field(0, ge=0, allow_inf_nan=False)
+    llm_price_out_per_1m: float = Field(0, ge=0, allow_inf_nan=False)
+    usd_to_rub: float = Field(0, ge=0, allow_inf_nan=False)
     font_dir: Path = Path('/usr/share/fonts/truetype/dejavu')
