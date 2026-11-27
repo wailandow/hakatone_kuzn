@@ -1,0 +1,191 @@
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Softline AI Agent — Architecture</title>
+<style>
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 32px 18px;
+  background: #f3f6fb;
+  color: #17243a;
+  font: 15px Arial, sans-serif;
+}
+h1 { text-align:center; font-size:26px; }
+.subtitle {
+  text-align:center; color:#68768b;
+  margin-bottom:30px;
+}
+.architecture {
+  max-width:1050px; margin:auto;
+  display:flex; flex-direction:column;
+  align-items:center; gap:12px;
+}
+.node {
+  width:min(100%,720px);
+  padding:17px 22px;
+  border:1px solid #d8e0eb;
+  border-radius:12px;
+  background:white;
+  text-align:center;
+  box-shadow:0 3px 12px #2030500b;
+}
+.node h3 { margin:0 0 8px; font-size:17px; }
+.node p { margin:4px 0; color:#65748a; font-size:13px; }
+.client { border-left:5px solid #3985d6; }
+.webim { border:2px solid #3985d6; background:#edf5ff; }
+.backend { border-left:5px solid #15a36b; }
+.ai { border:2px solid #15a36b; background:#edfaf3; }
+.manager { border-left:5px solid #9562cc; }
+.data { border-left:5px solid #d99b35; }
+.arrow {
+  color:#8493a7; font-size:23px;
+  line-height:20px;
+}
+.tag {
+  display:inline-block; padding:5px 10px;
+  background:#dceaff; color:#245a9c;
+  border-radius:20px; font-size:11px;
+  margin:4px;
+}
+.grid {
+  display:grid; grid-template-columns:1fr 1fr;
+  gap:10px; margin-top:12px;
+}
+.cell {
+  background:white; border-radius:9px;
+  padding:13px; border:1px solid #dce8df;
+}
+.cell b { display:block; margin-bottom:5px; }
+.bottom {
+  width:min(100%,720px);
+  display:grid; grid-template-columns:1fr 1fr;
+  gap:12px;
+}
+.bottom .node { width:100%; }
+.note {
+  max-width:720px; margin:30px auto;
+  padding:16px; background:#fff;
+  border-radius:10px; color:#52647a;
+  font-size:13px; line-height:1.6;
+}
+@media(max-width:600px) {
+  .grid,.bottom { grid-template-columns:1fr; }
+  body { padding:20px 12px; }
+}
+</style>
+</head>
+<body>
+<h1>ИИ-агент поддержки Softline</h1>
+<div class="subtitle">
+  Архитектура пресейл-агента и интеграция с Webim Smart Bot 2.0
+</div>
+
+<main class="architecture">
+
+  <section class="node client">
+    <h3>👤 Клиент Store.softline.ru</h3>
+    <p>Задаёт вопрос, подбирает продукт, получает консультацию</p>
+  </section>
+
+  <div class="arrow">↕</div>
+
+  <section class="node webim">
+    <h3>💬 Webim Smart Bot 2.0</h3>
+    <p>Внешняя платформа клиентского чата</p>
+    <span class="tag">new_chat / new_message</span>
+    <span class="tag">send_message</span>
+    <span class="tag">redirect_chat</span>
+  </section>
+
+  <div class="arrow">↕ HTTP / JSON</div>
+
+  <section class="node backend">
+    <h3>🔌 Интеграционный слой FastAPI</h3>
+    <p>app/webim/webhook.py</p>
+    <p>Приём событий, авторизация, проверка данных</p>
+    <p>Очередь сообщений и восстановление после перезапуска</p>
+    <p>app/webim/client.py — отправка ответов в Webim API</p>
+  </section>
+
+  <div class="arrow">↕</div>
+
+  <section class="node ai">
+    <h3>🧠 Ядро ИИ-агента</h3>
+    <p>app/agent/llm_client.py</p>
+    <div class="grid">
+      <div class="cell">
+        <b>Понимание запроса</b>
+        <p>Определение потребности и контекста</p>
+      </div>
+      <div class="cell">
+        <b>Управление диалогом</b>
+        <p>Уточнение недостающих параметров</p>
+      </div>
+      <div class="cell">
+        <b>Tool Calling</b>
+        <p>Вызов функций поиска и генерации КП</p>
+      </div>
+      <div class="cell">
+        <b>LLM</b>
+        <p>Формирование ответа на основе найденных данных</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="arrow">↕</div>
+
+  <section class="node data">
+    <h3>🗄 База данных и поисковая система</h3>
+    <p>SQLite + FTS5 + BM25 + E5 Embeddings + RRF</p>
+    <div class="grid">
+      <div class="cell">
+        <b>Каталог товаров</b>
+        <p>Feed, артикулы, цены, версии, характеристики</p>
+      </div>
+      <div class="cell">
+        <b>База знаний</b>
+        <p>Документация, инструкции, ответы менеджеров</p>
+      </div>
+      <div class="cell">
+        <b>История чатов</b>
+        <p>Сообщения и состояние обращений</p>
+      </div>
+      <div class="cell">
+        <b>Аудит и КП</b>
+        <p>События, подтверждения, PDF</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="arrow">↕</div>
+
+  <div class="bottom">
+    <section class="node manager">
+      <h3>👨‍💼 Интерфейс менеджера</h3>
+      <p>Обработка сложных обращений</p>
+      <p>Ответ клиенту</p>
+      <p>Проверка и публикация статей БЗ</p>
+    </section>
+    <section class="node">
+      <h3>📄 Коммерческое предложение</h3>
+      <p>Подбор товаров из каталога</p>
+      <p>Расчёт цены и скидки</p>
+      <p>Подтверждение клиентом</p>
+      <p>Генерация и отправка PDF</p>
+    </section>
+  </div>
+
+</main>
+
+<div class="note">
+  <b>Ключевой принцип архитектуры:</b>
+  Webim отвечает за транспорт сообщений, FastAPI — за интеграцию,
+  Agent — за интеллектуальную обработку запроса, AgentTools —
+  за выполнение операций, SQLite — за хранение данных.
+  Менеджер подключается при эскалации и помогает пополнять базу знаний.
+</div>
+</body>
+</html>
