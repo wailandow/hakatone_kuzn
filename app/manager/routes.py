@@ -22,6 +22,7 @@ def manager(request: Request):
 
 
 router = APIRouter(prefix='/api/manager', include_in_schema=False, dependencies=[Depends(manager)])
+KB_DRAFT_TIMEOUT = 60.0
 
 
 class DraftSource(CommandModel):
@@ -102,7 +103,7 @@ async def make_qa(agent, chat_id, question, answer):
     start = monotonic()
     usage, error = None, None
     try:
-        async with asyncio.timeout(20):
+        async with asyncio.timeout(KB_DRAFT_TIMEOUT):
             result = await agent._provider().chat.completions.create(
                 model=agent.settings.llm_fast_model or agent.settings.llm_model,
                 messages=[{'role': 'system', 'content': 'Из обезличенного ответа менеджера составь справочный '
@@ -117,6 +118,9 @@ async def make_qa(agent, chat_id, question, answer):
         return 'llm', safe_qa(QA.model_validate_json(choice.message.content))
     except HTTPException:
         raise
+    except TimeoutError:
+        error = 'TimeoutError'
+        raise HTTPException(504, 'Модель не успела сформировать Q&A-черновик, попробуйте ещё раз') from None
     except Exception as exc:
         error = type(exc).__name__
         raise HTTPException(502, 'Не удалось сформировать Q&A-черновик') from None
