@@ -105,4 +105,9 @@ CREATE TABLE IF NOT EXISTS demo_kb_drafts (
  reply_id INTEGER NOT NULL REFERENCES messages(id), question TEXT NOT NULL, answer TEXT NOT NULL,
  mode TEXT NOT NULL, article_id INTEGER REFERENCES kb_articles(id)
 );
+CREATE TABLE IF NOT EXISTS chat_recent_offers (
+ chat_id TEXT PRIMARY KEY NOT NULL REFERENCES chats(chat_id),
+ offers_json TEXT NOT NULL,
+ updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 COMMIT;

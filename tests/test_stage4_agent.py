@@ -397,3 +397,27 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                 await agent.aclose()
                 await args['http_client'].aclose()
         close.assert_awaited_once()
+
+    async def test_recent_catalog_offers_persist_into_next_turn_context(self):
+        self.create.side_effect = [
+            completion(calls=[tool_call('1', 'search_catalog', {'query': 'РЕД'})]),
+            completion('Нашёл вариант'),
+            completion('Принято'),
+        ]
+        reply1 = await self.agent.run('a', [{'role': 'user', 'content': 'Нужна РЕД ОС'}])
+        self.assertEqual(reply1, 'Нашёл вариант')
+        reply2 = await self.agent.run('a', [
+            {'role': 'user', 'content': 'Нужна РЕД ОС'},
+            {'role': 'assistant', 'content': 'Нашёл вариант'},
+            {'role': 'user', 'content': 'Подготовьте КП'},
+        ])
+        self.assertEqual(reply2, 'Принято')
+        turn2_messages = self.create.call_args_list[2].kwargs['messages']
+        ctx_text = turn2_messages[1]['content']
+        self.assertIn('recent_catalog_offers', ctx_text)
+        ctx = json.loads(ctx_text.split(': ', 1)[1])
+        offers = ctx['recent_catalog_offers']
+        self.assertEqual(len(offers), 1)
+        self.assertEqual(offers[0]['id'], '1')
+        self.assertEqual(offers[0]['vendor_code'], 'RED-1')
+        self.assertEqual(offers[0]['price'], 100.0)

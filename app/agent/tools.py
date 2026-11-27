@@ -142,6 +142,8 @@ class AgentTools:
                 else:
                     handler = self.search_catalog if name == 'search_catalog' else self.search_kb
                     result = await _run_search(handler, arguments)
+                    if name == 'search_catalog' and isinstance(result, list) and result:
+                        self.record_recent_offers(chat_id, result)
             except Exception as exc:
                 self.audit(chat_id, 'error', {'stage': 'tool', 'tool': name, 'exception': type(exc).__name__})
                 result = _manager_error('TOOL_FAILURE')
@@ -194,6 +196,57 @@ class AgentTools:
         return [dict(row) | {'title': row['title'][:240], 'content': row['content'][:1200],
                              'url': row['url'] if row['url'] and len(row['url']) <= 512 else None}
                 for row in rows]
+
+    def recent_offers(self, chat_id):
+        """Return compact summaries of recently found catalog offers for this chat."""
+        try:
+            with db.connect(self.settings.db_path, timeout=2) as conn:
+                row = conn.execute('SELECT offers_json FROM chat_recent_offers WHERE chat_id=?', (chat_id,)).fetchone()
+            if not row:
+                return []
+            data = json.loads(row['offers_json'])
+            return data if isinstance(data, list) else []
+        except (sqlite3.Error, ValueError, TypeError):
+            return []
+
+    def record_recent_offers(self, chat_id, cards):
+        compact = []
+        seen = set()
+        for card in cards:
+            if not isinstance(card, dict) or not _text(card.get('id'), 240):
+                continue
+            oid = card['id']
+            if oid in seen:
+                continue
+            seen.add(oid)
+            compact.append({
+                'id': oid,
+                'vendor_code': card.get('vendor_code'),
+                'name': (card.get('name') or '')[:140],
+                'price': card.get('price'),
+                'currency': card.get('currency'),
+            })
+        if not compact:
+            return
+        try:
+            with db.connect(self.settings.db_path, timeout=1) as conn, conn:
+                if conn.execute('SELECT 1 FROM chats WHERE chat_id=?', (chat_id,)).fetchone() is None:
+                    return
+                prev = conn.execute('SELECT offers_json FROM chat_recent_offers WHERE chat_id=?', (chat_id,)).fetchone()
+                if prev:
+                    try:
+                        for item in json.loads(prev['offers_json']):
+                            if isinstance(item, dict) and item.get('id') not in seen and len(compact) < 8:
+                                seen.add(item['id'])
+                                compact.append(item)
+                    except (ValueError, TypeError):
+                        pass
+                conn.execute('''INSERT INTO chat_recent_offers(chat_id,offers_json,updated_at)
+                    VALUES (?,?,CURRENT_TIMESTAMP)
+                    ON CONFLICT(chat_id) DO UPDATE SET offers_json=excluded.offers_json,
+                    updated_at=CURRENT_TIMESTAMP''', (chat_id, _json(compact[:8])))
+        except (sqlite3.Error, ValueError, TypeError) as exc:
+            logger.warning('Recent offers write failed (%s)', type(exc).__name__)
 
     def pending_quote(self, chat_id):
         """Trusted adapter only: display this exact proposal with an explicit confirmation action."""
