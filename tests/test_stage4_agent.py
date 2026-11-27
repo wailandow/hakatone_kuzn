@@ -399,8 +399,11 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
         close.assert_awaited_once()
 
     async def test_recent_catalog_offers_persist_into_next_turn_context(self):
+        with connect(self.settings.db_path) as db, db:
+            db.execute('''INSERT INTO offers(id,name,vendor,vendor_code,price,currency,available,is_russian_registry)
+                VALUES ('1','РЕД ОС 7.3','РЕД СОФТ','RED-1',100.0,'RUB',1,1)''')
         self.create.side_effect = [
-            completion(calls=[tool_call('1', 'search_catalog', {'query': 'РЕД'})]),
+            completion(calls=[call('search_catalog', json.dumps({'query': 'РЕД'}))]),
             completion('Нашёл вариант'),
             completion('Принято'),
         ]
