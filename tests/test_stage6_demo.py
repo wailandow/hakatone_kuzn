@@ -43,7 +43,7 @@ class DemoTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(page.status_code, 200)
         self.assertNotIn('>Тестовый пилот</button>', page.text)
         self.assertNotIn('>Товары</button>', page.text)
-        self.assertIn('>КП</button>', page.text)
+        self.assertIn('data-ask="Подготовьте КП">КП</button>', page.text)
         self.assertIn('data-ask="Переведите на менеджера.">Эскалация</button>', page.text)
         self.assertNotIn('Нужна скидка больше 5%', page.text)
         js = (await self.http.get('/demo.js')).text
