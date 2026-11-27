@@ -44,7 +44,10 @@ class DemoTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('>Тестовый пилот</button>', page.text)
         self.assertNotIn('>Товары</button>', page.text)
         self.assertIn('>КП</button>', page.text)
-        self.assertIn('>Эскалация</button>', page.text)
+        self.assertIn('data-ask="Переведите на менеджера.">Эскалация</button>', page.text)
+        self.assertNotIn('Нужна скидка больше 5%', page.text)
+        js = (await self.http.get('/demo.js')).text
+        self.assertIn('md-table', js)
 
     async def test_quote_confirmation_requires_both_chat_capability_and_exact_proposal(self):
         chat, auth = await self.new()
@@ -215,3 +218,35 @@ class DemoTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stats['average_tokens'], 30)
         self.assertAlmostEqual(stats['average_cost_usd'], .00004)
         self.assertAlmostEqual(stats['average_cost_rub'], .004)
+
+    async def test_kb_draft_with_llm_uses_full_completion_budget(self):
+        from app.agent.llm_client import MAX_COMPLETION_TOKENS
+
+        chat, auth = await self.new()
+        await self.turn(chat, auth, 'Как оформить тестовый пилот?')
+        reply = await self.http.post(f'/api/manager/chats/{chat}/reply', headers=self.manager,
+                                     json={'text': 'Согласуйте пилот через менеджера.'})
+        self.assertEqual(reply.status_code, 201, reply.text)
+        seen = {}
+        agent = self.app.state.agent
+        agent.settings.llm_model = 'fixture'
+        agent.settings.llm_api_key = SecretStr('not-a-provider-key')
+        async def complete(**kwargs):
+            seen.update(kwargs)
+            return SimpleNamespace(
+                usage=SimpleNamespace(prompt_tokens=50, completion_tokens=600),
+                choices=[SimpleNamespace(
+                    finish_reason='stop',
+                    message=SimpleNamespace(content=json.dumps({
+                        'question': 'Как оформить тестовый пилот?',
+                        'answer': 'Согласуйте тестовый пилот через менеджера.',
+                    }, ensure_ascii=False)),
+                )],
+            )
+        agent._client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=complete)))
+        agent._owned_client = False
+        draft = await self.http.post('/api/manager/kb-from-reply', headers=self.manager,
+                                     json={'chat_id': chat, 'reply_id': reply.json()['reply_id']})
+        self.assertEqual(draft.status_code, 201, draft.text)
+        self.assertEqual(draft.json()['mode'], 'llm')
+        self.assertEqual(seen.get('max_tokens'), MAX_COMPLETION_TOKENS)

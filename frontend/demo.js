@@ -25,7 +25,7 @@ const managerOn = (id, event, fn) => on(id, event, fn, 'manager-error');
 const clientPath = id => `/api/demo/chats/${id}`;
 const managerPath = id => `/api/manager/chats/${id}`;
 
-function markdown(parent, text) {
+function markdownInline(parent, text) {
   // Small safe subset: links, emphasis, bold and inline code; raw HTML is always text.
   const pattern = /\[([^\]\n]+)\]\((https:\/\/[^\s)]+)\)|\*\*([^*\n]+)\*\*|\*([^*\n]+)\*|`([^`\n]+)`/g;
   let at = 0;
@@ -51,6 +51,82 @@ function markdown(parent, text) {
     at = part.index + part[0].length;
   }
   parent.append(text.slice(at));
+}
+function splitTableRow(line) {
+  const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '');
+  return trimmed.split('|').map(cell => cell.trim());
+}
+function parseTableAlign(line, expected) {
+  if (!line || !line.includes('|')) return null;
+  const cells = splitTableRow(line);
+  if (cells.length !== expected || !cells.every(cell => /^:?-{3,}:?$/.test(cell))) return null;
+  return cells.map(cell => cell.startsWith(':') && cell.endsWith(':') ? 'center'
+    : cell.endsWith(':') ? 'right' : 'left');
+}
+function renderTable(headers, aligns, rows) {
+  const wrap = document.createElement('div');
+  wrap.className = 'md-table-wrap';
+  const table = document.createElement('table');
+  table.className = 'md-table';
+  const thead = document.createElement('thead');
+  const hrow = document.createElement('tr');
+  headers.forEach((cell, idx) => {
+    const th = document.createElement('th');
+    th.style.textAlign = aligns[idx] || 'left';
+    markdownInline(th, cell);
+    hrow.append(th);
+  });
+  thead.append(hrow);
+  table.append(thead);
+  const tbody = document.createElement('tbody');
+  for (const row of rows) {
+    const tr = document.createElement('tr');
+    headers.forEach((_, idx) => {
+      const td = document.createElement('td');
+      td.style.textAlign = aligns[idx] || 'left';
+      markdownInline(td, row[idx] || '');
+      tr.append(td);
+    });
+    tbody.append(tr);
+  }
+  table.append(tbody);
+  wrap.append(table);
+  return wrap;
+}
+function markdown(parent, text) {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  let buf = [];
+  const flushText = () => {
+    if (!buf.length) return;
+    const p = document.createElement('div');
+    p.className = 'md-text';
+    markdownInline(p, buf.join('\n'));
+    parent.append(p);
+    buf = [];
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.includes('|') && i + 1 < lines.length) {
+      const headers = splitTableRow(line);
+      const aligns = headers.length >= 2 ? parseTableAlign(lines[i + 1], headers.length) : null;
+      if (aligns) {
+        const rows = [];
+        let j = i + 2;
+        while (j < lines.length && lines[j].trim() && lines[j].includes('|')) {
+          rows.push(splitTableRow(lines[j]));
+          j++;
+        }
+        if (rows.length) {
+          flushText();
+          parent.append(renderTable(headers, aligns, rows));
+          i = j - 1;
+          continue;
+        }
+      }
+    }
+    buf.push(line);
+  }
+  flushText();
 }
 function renderLog(id, messages, scope) {
   const log = $(id);
