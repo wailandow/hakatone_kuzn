@@ -313,3 +313,11 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
         dup = await self.call(items=[{'offer_id': '1', 'quantity': 1},
                                      {'offer_id': 'OS2001X8618DIG000WS01-SO12', 'quantity': 1}])
         self.assertEqual(dup.get('error'), 'INVALID_ARGUMENTS')
+
+    async def test_quote_normalizes_standard_payment_and_electronic_delivery_aliases(self):
+        result = await self.call(discount_percent='5', payment_terms='Предоплата',
+                                 delivery_terms='Электронная поставка.')
+        self.assertEqual(result['status'], 'confirmation_required')
+        self.assertEqual(result['quote']['payment_terms'], 'Предоплата 100%')
+        self.assertEqual(result['quote']['delivery_terms'],
+                         'В соответствии с условиями поставки вендора (обычно 1-5 рабочих дней)')

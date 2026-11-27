@@ -69,10 +69,14 @@ TOOL_SCHEMAS = [
     _tool('search_kb', 'Поиск по базе знаний, включая статьи менеджера.',
           {'query': _STR, 'limit': {**_INT, 'minimum': 1, 'maximum': 4}}, ('query',)),
     _tool('generate_kp_pdf', 'Подготовить состав КП для подтверждения или выпустить подтверждённый PDF. '
-          'Не передавай цены, пути или факт подтверждения; подтверждение регистрирует интерфейс.',
+          'Не передавай цены, пути или факт подтверждения; подтверждение регистрирует интерфейс. '
+          'Для стандартных условий (предоплата 100%, электронная/стандартная поставка) не передавай payment_terms и delivery_terms.',
           {'items': {'type': 'array', 'minItems': 1, 'maxItems': MAX_QUOTE_ITEMS, 'items': _ITEM},
-           'discount_percent': {'type': 'number'}, 'payment_terms': {**_STR, 'default': DEFAULT_PAYMENT},
-           'delivery_terms': {**_STR, 'default': DEFAULT_DELIVERY}}, ('items',)),
+           'discount_percent': {'type': 'number'},
+           'payment_terms': {**_STR, 'default': DEFAULT_PAYMENT,
+                             'description': f'Опусти для стандартной оплаты ({DEFAULT_PAYMENT}). Передавай только нестандартные условия (постоплата, отсрочка).'},
+           'delivery_terms': {**_STR, 'default': DEFAULT_DELIVERY,
+                              'description': f'Опусти для стандартной/электронной поставки ({DEFAULT_DELIVERY}). Передавай только особые сроки.'}}, ('items',)),
     _tool('escalate_to_manager', 'Передать диалог менеджеру.',
           {'reason': _STR, 'summary': _STR, 'collected_slots': {'type': 'object'}},
           ('reason', 'summary', 'collected_slots')),
@@ -101,6 +105,41 @@ def _discount(value):
     if not discount.is_finite():
         raise ValueError
     return discount
+
+
+_STD_PAYMENT_ALIASES = frozenset({
+    'предоплата',
+    'предоплата 100%',
+    '100% предоплата',
+    '100 % предоплата',
+    'предоплата 100 %',
+    'стандартная',
+    'стандартные',
+    'стандартные условия',
+})
+_STD_DELIVERY_ALIASES = frozenset({
+    'электронная',
+    'электронная поставка',
+    'электронная доставка',
+    'электронный ключ',
+    'электронная лицензия',
+    'по условиям вендора',
+    'стандартная',
+    'стандартная поставка',
+    'стандартные',
+    'в соответствии с условиями поставки вендора',
+    'в соответствии с условиями поставки вендора (обычно 1-5 рабочих дней)',
+})
+
+
+def _norm_term(value):
+    return ' '.join(value.replace('–', '-').replace('—', '-').strip().rstrip('.').lower().split())
+
+
+def _canonical_terms(payment_terms, delivery_terms):
+    payment = DEFAULT_PAYMENT if _norm_term(payment_terms) in _STD_PAYMENT_ALIASES else payment_terms
+    delivery = DEFAULT_DELIVERY if _norm_term(delivery_terms) in _STD_DELIVERY_ALIASES else delivery_terms
+    return payment, delivery
 
 
 def _active(conn, chat_id):
@@ -291,6 +330,7 @@ class AgentTools:
             quantities[item['offer_id']] = item['quantity']
         if not _text(payment_terms, 240) or not _text(delivery_terms, 240):
             return {'error': 'INVALID_ARGUMENTS'}
+        payment_terms, delivery_terms = _canonical_terms(payment_terms, delivery_terms)
         if payment_terms != DEFAULT_PAYMENT or delivery_terms != DEFAULT_DELIVERY:
             return _manager_error('SPECIAL_TERMS')
         result = await asyncio.to_thread(self._quote, chat_id, quantities, discount, payment_terms, delivery_terms)
