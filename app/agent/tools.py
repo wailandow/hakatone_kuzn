@@ -288,14 +288,36 @@ class AgentTools:
         return {'status': 'generated', 'pdf_url': url, 'total_sum': f'{total:.2f}'}
 
     @staticmethod
-    def _proposal(conn, quantities, discount, payment, delivery):
+    def _resolve_offer(conn, raw_id):
+        row = conn.execute('''SELECT id,name,vendor_code,price,currency,available,is_russian_registry
+            FROM offers WHERE id=?''', (raw_id,)).fetchone()
+        if row is not None:
+            return row, None
+        matches = conn.execute('''SELECT id,name,vendor_code,price,currency,available,is_russian_registry
+            FROM offers WHERE vendor_code=? COLLATE NOCASE''', (raw_id,)).fetchall()
+        if len(matches) == 1:
+            return matches[0], None
+        if len(matches) > 1:
+            available = [item for item in matches if item['available'] == 1]
+            if len(available) == 1:
+                return available[0], None
+            return None, {'error': 'OFFER_AMBIGUOUS', 'offer_id': raw_id}
+        return None, {'error': 'OFFER_NOT_FOUND', 'offer_id': raw_id}
+
+    @classmethod
+    def _proposal(cls, conn, quantities, discount, payment, delivery):
+        resolved = {}
+        for raw_id, quantity in quantities.items():
+            row, err = cls._resolve_offer(conn, raw_id)
+            if err is not None:
+                return err
+            canonical_id = row['id']
+            if canonical_id in resolved:
+                return {'error': 'INVALID_ARGUMENTS'}
+            resolved[canonical_id] = (row, quantity)
         items, lines = [], []
         total = Decimal('0.00')
-        for offer_id, quantity in sorted(quantities.items()):
-            row = conn.execute('''SELECT name,vendor_code,price,currency,available,is_russian_registry
-                FROM offers WHERE id=?''', (offer_id,)).fetchone()
-            if row is None:
-                return {'error': 'OFFER_NOT_FOUND', 'offer_id': offer_id}
+        for offer_id, (row, quantity) in sorted(resolved.items()):
             if row['available'] != 1:
                 return {'error': 'OFFER_UNAVAILABLE', 'offer_id': offer_id}
             if row['currency'] not in ('RUB', 'RUR'):

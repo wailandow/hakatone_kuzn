@@ -299,3 +299,17 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await tools_err.execute('c', 'escalate_to_manager', args))['status'], 'escalated')
         self.assertEqual(self.rows("SELECT status FROM chats WHERE chat_id='c'")[0][0], 'escalated')
         self.assertIn(('redirect', 'c'), events)
+
+    async def test_quote_accepts_unique_vendor_code_as_offer_id(self):
+        with connect(self.settings.db_path) as db, db:
+            db.execute("UPDATE offers SET vendor_code='OS2001X8618DIG000WS01-SO12' WHERE id='1'")
+        result = await self.call(items=[{'offer_id': 'os2001x8618dig000ws01-so12', 'quantity': 2}])
+        self.assertEqual(result['status'], 'confirmation_required')
+        self.assertEqual(result['quote']['items'][0]['offer_id'], '1')
+        self.assertEqual(result['quote']['items'][0]['vendor_code'], 'OS2001X8618DIG000WS01-SO12')
+        pending = self.tools.pending_quote('a')
+        self.assertTrue(self.tools.confirm_quote('a', pending['confirmation_id']))
+        # Duplicate canonical offer passed both by id and by vendor_code is rejected.
+        dup = await self.call(items=[{'offer_id': '1', 'quantity': 1},
+                                     {'offer_id': 'OS2001X8618DIG000WS01-SO12', 'quantity': 1}])
+        self.assertEqual(dup.get('error'), 'INVALID_ARGUMENTS')
