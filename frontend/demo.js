@@ -153,7 +153,10 @@ function renderLog(id, messages, scope) {
     row.textContent = 'Сообщений пока нет';
     log.append(row);
   }
+  const detailedPdfs = new Set(messages.flatMap(item =>
+    item.text ? (item.text.match(/\/pdfs\/kp_[a-f0-9]{32}\.pdf/g) || []) : []));
   for (const item of messages) {
+    if (!item.text && item.pdf && detailedPdfs.has(item.pdf)) continue;
     const row = document.createElement('li');
     const name = document.createElement('small');
     name.textContent = ({client: 'Клиент', bot: 'Агент', manager: 'Менеджер'})[item.sender] || 'Система';
