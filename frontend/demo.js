@@ -25,27 +25,41 @@ const managerOn = (id, event, fn) => on(id, event, fn, 'manager-error');
 const clientPath = id => `/api/demo/chats/${id}`;
 const managerPath = id => `/api/manager/chats/${id}`;
 
+const PDF_PATH = /^\/pdfs\/kp_[a-f0-9]{32}\.pdf$/;
+
+function safeLink(rawUrl) {
+  let url;
+  try { url = new URL(rawUrl); } catch { return null; }
+  if (url.username || url.password) return null;
+  if ((url.protocol === 'https:' || url.protocol === 'http:') &&
+      PDF_PATH.test(url.pathname) && !url.search && !url.hash) {
+    return url.pathname;
+  }
+  if (url.protocol === 'https:' && ['store.softline.ru', 'docs.softline.com'].includes(url.hostname)) {
+    return url.href;
+  }
+  return null;
+}
+
 function markdownInline(parent, text) {
-  // Small safe subset: links, emphasis, bold and inline code; raw HTML is always text.
-  const pattern = /\[([^\]\n]+)\]\((https:\/\/[^\s)]+)\)|\*\*([^*\n]+)\*\*|\*([^*\n]+)\*|`([^`\n]+)`/g;
+  // Small safe subset: links, KP PDF URLs, emphasis, bold and inline code; raw HTML is always text.
+  const pattern = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>()]+\/pdfs\/kp_[a-f0-9]{32}\.pdf)|\*\*([^*\n]+)\*\*|\*([^*\n]+)\*|`([^`\n]+)`/g;
   let at = 0;
   for (const part of text.matchAll(pattern)) {
     parent.append(text.slice(at, part.index));
     let element;
-    if (part[2]) {
-      let url;
-      try { url = new URL(part[2]); } catch { /* Render invalid URLs as text. */ }
-      if (url && url.protocol === 'https:' && !url.username && !url.password &&
-          ['store.softline.ru', 'docs.softline.com'].includes(url.hostname)) {
+    if (part[2] || part[3]) {
+      const href = safeLink(part[2] || part[3]);
+      if (href) {
         element = document.createElement('a');
-        element.href = url.href;
+        element.href = href;
         element.target = '_blank';
         element.rel = 'noopener noreferrer';
-        element.textContent = part[1];
+        element.textContent = part[2] ? part[1] : part[3];
       }
     } else {
-      element = document.createElement(part[3] ? 'strong' : part[4] ? 'em' : 'code');
-      element.textContent = part[3] || part[4] || part[5];
+      element = document.createElement(part[4] ? 'strong' : part[5] ? 'em' : 'code');
+      element.textContent = part[4] || part[5] || part[6];
     }
     parent.append(element || part[0]);
     at = part.index + part[0].length;

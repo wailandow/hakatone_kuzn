@@ -48,6 +48,8 @@ class DemoTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('Нужна скидка больше 5%', page.text)
         js = (await self.http.get('/demo.js')).text
         self.assertIn('md-table', js)
+        self.assertIn('safeLink', js)
+        self.assertIn(r'\/pdfs\/kp_[a-f0-9]{32}', js)
 
     async def test_quote_confirmation_requires_both_chat_capability_and_exact_proposal(self):
         chat, auth = await self.new()
